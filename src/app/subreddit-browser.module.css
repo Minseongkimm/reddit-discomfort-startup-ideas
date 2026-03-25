@@ -1,0 +1,255 @@
+.wrapper {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.selectorArea {
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.selectorLabel {
+  margin: 0;
+  font-size: 13px;
+  color: #374151;
+  font-weight: 700;
+}
+
+.searchRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.searchInput {
+  width: 100%;
+  height: 36px;
+  border: 1px solid #d1d5db;
+  border-radius: 9px;
+  background: #f9fafb;
+  color: #111827;
+  font-size: 13px;
+  padding: 0 10px;
+}
+
+.clearButton {
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 9px;
+  background: #ffffff;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.clearButton:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.selectorHint {
+  margin: 0;
+  font-size: 12px;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.quickRow {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.quickButton {
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  background: #f9fafb;
+  color: #111827;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.quickButton span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  font-size: 11px;
+  color: #374151;
+}
+
+.quickActive {
+  border-color: #111827;
+  background: #eef2ff;
+}
+
+.quickActive span {
+  background: #111827;
+  color: #ffffff;
+}
+
+.selectorControl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.select {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  border: 1px solid #d1d5db;
+  border-radius: 9px;
+  background: #f9fafb;
+  color: #111827;
+  font-size: 13px;
+  padding: 0 10px;
+}
+
+.sortRow {
+  display: flex;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+.sortButton {
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #374151;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sortActive {
+  border-color: #111827;
+  background: #111827;
+  color: #ffffff;
+}
+
+.detailArea {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.detailHeader h2 {
+  margin: 0;
+  font-size: 18px;
+  color: #111827;
+}
+
+.detailHeader p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.problemGrid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.problemItem {
+  padding: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f9fafb;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.statement {
+  margin: 0;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.meta {
+  margin: 0;
+  color: #4b5563;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.evidence {
+  margin: 0;
+  color: #6b7280;
+  font-size: 11px;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.link {
+  margin-top: 2px;
+  color: #1d4ed8;
+  font-size: 11px;
+  text-decoration: none;
+}
+
+.empty {
+  margin: 0;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+@media (max-width: 640px) {
+  .searchRow {
+    grid-template-columns: 1fr;
+  }
+
+  .selectorHint {
+    white-space: normal;
+  }
+
+  .selectorControl {
+    grid-template-columns: 1fr;
+  }
+
+  .sortRow {
+    flex-wrap: wrap;
+  }
+
+  .problemGrid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  }
+}
