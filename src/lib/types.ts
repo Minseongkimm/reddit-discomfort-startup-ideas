@@ -34,6 +34,7 @@ export type ProblemItem = {
   severity: number;
   evidence: string;
   sourceUrl: string;
+  llmReason?: string;
 };
 
 export type SubredditResult = {

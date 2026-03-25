@@ -15,7 +15,10 @@ function normalizeQuery(value: string) {
 }
 
 export default function SubredditBrowser({ results }: SubredditBrowserProps) {
-  const [selected, setSelected] = useState(results[0]?.subreddit ?? "");
+  const [selected, setSelected] = useState(() =>
+    results.find((item) => item.problems.some((problem) => Boolean(problem.llmReason?.trim())))
+      ?.subreddit ?? results[0]?.subreddit ?? "",
+  );
   const [query, setQuery] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("problems");
 
@@ -150,9 +153,15 @@ export default function SubredditBrowser({ results }: SubredditBrowserProps) {
             {current.problems.map((problem) => (
               <li key={problem.id} className={styles.problemItem}>
                 <p className={styles.statement}>{problem.statement}</p>
-                <p className={styles.meta}>신호 {problem.signal}</p>
                 <p className={styles.meta}>빈도 {problem.frequency} · 심각도 {problem.severity}/5</p>
+                <p className={styles.evidenceLabel}>원문 근거</p>
                 <p className={styles.evidence}>{problem.evidence}</p>
+                <p className={styles.llmLabel}>LLM 요약</p>
+                <p
+                  className={`${styles.llmReason} ${problem.llmReason ? "" : styles.llmReasonEmpty}`.trim()}
+                >
+                  {problem.llmReason ? problem.llmReason : "없음 (분류 대기 가능)"}
+                </p>
                 <a
                   href={problem.sourceUrl}
                   target="_blank"

@@ -1,13 +1,21 @@
 import type { ProblemItem, StoredPost, SubredditResult } from "./types";
 
-type ProblemRule = {
+export type ProblemRule = {
   id: string;
   label: string;
   signal: string;
   pattern: RegExp;
 };
 
-const RULES: ProblemRule[] = [
+export type PostProblemSignal = {
+  ruleId: string;
+  severity: number;
+  evidence?: string;
+  sourceUrl?: string;
+  llmReason?: string;
+};
+
+export const PROBLEM_RULES: ProblemRule[] = [
   {
     id: "message_fragmentation",
     label: "문의 채널 분산으로 요청 누락이 발생함",
@@ -70,7 +78,25 @@ const RULES: ProblemRule[] = [
   },
 ];
 
-function calculateSeverity(post: StoredPost) {
+const PROBLEM_RULE_BY_ID = new Map(PROBLEM_RULES.map((rule) => [rule.id, rule]));
+
+export function getProblemRuleById(ruleId: string): ProblemRule | undefined {
+  return PROBLEM_RULE_BY_ID.get(ruleId);
+}
+
+export function getMatchedProblemRuleIds(text: string): string[] {
+  const matched: string[] = [];
+
+  for (const rule of PROBLEM_RULES) {
+    if (rule.pattern.test(text)) {
+      matched.push(rule.id);
+    }
+  }
+
+  return matched;
+}
+
+export function calculateSeverity(post: StoredPost) {
   const engagementScore = post.score + post.comments * 2;
   if (engagementScore >= 220) return 5;
   if (engagementScore >= 150) return 4;
@@ -79,7 +105,10 @@ function calculateSeverity(post: StoredPost) {
   return 1;
 }
 
-export function extractProblemsFromPosts(posts: StoredPost[]): SubredditResult[] {
+export function aggregateProblemsFromSignals(
+  posts: StoredPost[],
+  getSignals: (post: StoredPost) => PostProblemSignal[],
+): SubredditResult[] {
   const buckets = new Map<
     string,
     {
@@ -89,8 +118,6 @@ export function extractProblemsFromPosts(posts: StoredPost[]): SubredditResult[]
   >();
 
   for (const post of posts) {
-    const text = `${post.title} ${post.body}`;
-
     if (!buckets.has(post.subreddit)) {
       buckets.set(post.subreddit, {
         scannedPosts: 0,
@@ -105,12 +132,14 @@ export function extractProblemsFromPosts(posts: StoredPost[]): SubredditResult[]
 
     subredditBucket.scannedPosts += 1;
 
-    for (const rule of RULES) {
-      if (!rule.pattern.test(text)) {
+    const signals = getSignals(post);
+
+    for (const signal of signals) {
+      const rule = getProblemRuleById(signal.ruleId);
+      if (!rule) {
         continue;
       }
 
-      const severity = calculateSeverity(post);
       const existing = subredditBucket.problems.get(rule.id);
 
       if (!existing) {
@@ -119,22 +148,24 @@ export function extractProblemsFromPosts(posts: StoredPost[]): SubredditResult[]
           statement: rule.label,
           signal: rule.signal,
           frequency: 1,
-          severity,
-          evidence: post.title,
-          sourceUrl: post.permalink,
+          severity: signal.severity,
+          evidence: signal.evidence ?? post.title,
+          sourceUrl: signal.sourceUrl ?? post.permalink,
+          llmReason: signal.llmReason,
         });
         continue;
       }
 
       const nextFrequency = existing.frequency + 1;
       const averagedSeverity = Math.round(
-        (existing.severity * existing.frequency + severity) / nextFrequency,
+        (existing.severity * existing.frequency + signal.severity) / nextFrequency,
       );
 
       subredditBucket.problems.set(rule.id, {
         ...existing,
         frequency: nextFrequency,
         severity: averagedSeverity,
+        llmReason: existing.llmReason ?? signal.llmReason,
       });
     }
   }
@@ -148,4 +179,19 @@ export function extractProblemsFromPosts(posts: StoredPost[]): SubredditResult[]
       ),
     }))
     .sort((a, b) => b.problems.length - a.problems.length);
+}
+
+export function extractProblemsFromPosts(posts: StoredPost[]): SubredditResult[] {
+  return aggregateProblemsFromSignals(posts, (post) => {
+    const text = `${post.title} ${post.body}`;
+    const matchedRuleIds = getMatchedProblemRuleIds(text);
+    const severity = calculateSeverity(post);
+
+    return matchedRuleIds.map((ruleId) => ({
+      ruleId,
+      severity,
+      evidence: post.title,
+      sourceUrl: post.permalink,
+    }));
+  });
 }

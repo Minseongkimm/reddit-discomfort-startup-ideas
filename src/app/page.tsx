@@ -3,7 +3,7 @@ import { getDashboardData } from "@/lib/dashboard";
 import { isRedditConfigured } from "@/lib/reddit-client";
 import styles from "./page.module.css";
 import RefreshButton from "./refresh-button";
-import SubredditBrowser from "./subreddit-browser";
+import SubredditBrowserShell from "./subreddit-browser-shell";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +41,7 @@ export default async function Home() {
           </article>
         </section>
 
-        <SubredditBrowser results={data.results} />
+        <SubredditBrowserShell results={data.results} />
 
         {data.mode === "empty" && configured === false ? (
           <section className={styles.alert}>

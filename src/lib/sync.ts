@@ -5,6 +5,7 @@ import {
   SYNC_LIMIT_PER_REQUEST,
   getTargetSubreddits,
 } from "./config";
+import { rebuildDashboardSnapshot } from "./dashboard";
 import { fetchSubredditNew, isRedditConfigured } from "./reddit-client";
 import { getSamplePosts } from "./sample-posts";
 import { updateStore } from "./store";
@@ -58,11 +59,15 @@ function upsertPosts(store: RedditStore, posts: StoredPost[]) {
 export async function syncRedditData(): Promise<SyncSummary> {
   const now = new Date().toISOString();
 
+  let summary: SyncSummary;
+
   if (!isRedditConfigured()) {
-    return updateStore(async (store) => {
+    summary = await updateStore(async (store) => {
       const samplePosts = getSamplePosts();
       const newPosts = upsertPosts(store, samplePosts);
-      const uniqueSubreddits = Array.from(new Set(samplePosts.map((post) => post.subreddit)));
+      const uniqueSubreddits = Array.from(
+        new Set(samplePosts.map((post) => post.subreddit)),
+      );
 
       for (const subreddit of uniqueSubreddits) {
         store.subreddits[subreddit] = {
@@ -90,69 +95,77 @@ export async function syncRedditData(): Promise<SyncSummary> {
         },
       };
     });
-  }
+  } else {
+    const targets = getTargetSubreddits();
 
-  const targets = getTargetSubreddits();
-
-  return updateStore(async (store) => {
-    if (store.mode === "sample") {
-      store.posts = {};
-      store.subreddits = {};
-    }
-
-    let requests = 0;
-    let newPosts = 0;
-
-    for (const subreddit of targets) {
-      const key = subreddit.startsWith("r/") ? subreddit : `r/${subreddit}`;
-      const state = store.subreddits[key] ?? {
-        after: null,
-        lastFetchedAt: null,
-      };
-
-      const pagesToFetch = state.after ? INCREMENTAL_PAGES : INITIAL_BACKFILL_PAGES;
-      let cursor = state.after;
-
-      for (let page = 0; page < pagesToFetch; page += 1) {
-        const listing = await fetchSubredditNew({
-          subreddit: key,
-          after: cursor,
-          limit: SYNC_LIMIT_PER_REQUEST,
-        });
-
-        requests += 1;
-        newPosts += upsertPosts(store, listing.posts);
-
-        if (!listing.after || listing.after === cursor) {
-          break;
-        }
-
-        cursor = listing.after;
+    summary = await updateStore(async (store) => {
+      if (store.mode === "sample") {
+        store.posts = {};
+        store.subreddits = {};
       }
 
-      store.subreddits[key] = {
-        after: cursor,
-        lastFetchedAt: now,
-      };
-    }
+      let requests = 0;
+      let newPosts = 0;
 
-    const pruned = prunePosts({
-      ...store,
-      lastSyncAt: now,
-      mode: "live",
-    });
+      for (const subreddit of targets) {
+        const key = subreddit.startsWith("r/") ? subreddit : `r/${subreddit}`;
+        const state = store.subreddits[key] ?? {
+          after: null,
+          lastFetchedAt: null,
+        };
 
-    return {
-      store: pruned,
-      result: {
-        ok: true,
-        mode: "live",
-        subreddits: targets.length,
-        requests,
-        newPosts,
-        totalStoredPosts: Object.keys(pruned.posts).length,
+        const pagesToFetch = state.after ? INCREMENTAL_PAGES : INITIAL_BACKFILL_PAGES;
+        let cursor = state.after;
+
+        for (let page = 0; page < pagesToFetch; page += 1) {
+          const listing = await fetchSubredditNew({
+            subreddit: key,
+            after: cursor,
+            limit: SYNC_LIMIT_PER_REQUEST,
+          });
+
+          requests += 1;
+          newPosts += upsertPosts(store, listing.posts);
+
+          if (!listing.after || listing.after === cursor) {
+            break;
+          }
+
+          cursor = listing.after;
+        }
+
+        store.subreddits[key] = {
+          after: cursor,
+          lastFetchedAt: now,
+        };
+      }
+
+      const pruned = prunePosts({
+        ...store,
         lastSyncAt: now,
-      },
-    };
-  });
+        mode: "live",
+      });
+
+      return {
+        store: pruned,
+        result: {
+          ok: true,
+          mode: "live",
+          subreddits: targets.length,
+          requests,
+          newPosts,
+          totalStoredPosts: Object.keys(pruned.posts).length,
+          lastSyncAt: now,
+        },
+      };
+    });
+  }
+
+  try {
+    await rebuildDashboardSnapshot();
+  } catch (error) {
+    console.error("dashboard snapshot rebuild failed", error);
+  }
+
+  return summary;
 }
