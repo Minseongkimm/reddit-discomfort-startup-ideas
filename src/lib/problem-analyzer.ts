@@ -36,7 +36,7 @@ const VALID_RULE_IDS = new Set(PROBLEM_RULES.map((rule) => rule.id));
 const PAIN_HINT_PATTERN =
   /(problem|pain|issue|friction|stuck|struggle|frustrat|delay|miss|chaos|manual|cost|expensive|broken|hard|complaint|refund|cancel|불편|문제|어렵|힘들|안되|누락|지연|비용|반복|버그|환불|클레임)/i;
 
-const CLASSIFIER_PROMPT_VERSION = "summary-v2";
+const CLASSIFIER_PROMPT_VERSION = "summary-v4";
 const CACHE_MODEL_KEY = `${OLLAMA_MODEL}:${CLASSIFIER_PROMPT_VERSION}`;
 
 const SYSTEM_PROMPT = `You classify whether a Reddit post describes a real user pain point.
@@ -51,19 +51,34 @@ Output schema:
   "rule_ids": string[],
   "severity": integer 1..5,
   "confidence": number 0..1,
-  "reason": string
+  "reason": string,
+  "solution": string
 }
+
+Few-shot style examples for solution:
+- pain: "분석 대시보드마다 CAC가 다르게 나와 신뢰할 수 없음"
+  solution: "광고 채널 CAC 추적 도구"
+- pain: "결제 독촉을 수동으로 보내느라 회수 속도가 느림"
+  solution: "미수금 리마인드 자동화 앱"
+- pain: "문의가 DM/메일/댓글로 흩어져 누락이 발생"
+  solution: "옴니채널 문의 통합 보드"
 
 Rules:
 - Use only allowed rule_ids.
 - If not a pain point, set is_problem=false and rule_ids=[].
 - Pick at most 3 rule_ids.
 - reason must summarize the core user problem in Korean in 1-2 short sentences.
-- Do not use markdown or bullet points in reason.
+- solution must be a short Korean product concept (single line, 6~28 chars preferred).
+- solution must be noun-style. Avoid endings like "해야 합니다", "필요", "점검", "개선".
+- Do not use markdown or bullet points in reason or solution.
 `;
 
 function looksLikePainPoint(text: string): boolean {
   return PAIN_HINT_PATTERN.test(text);
+}
+
+function hasText(value: string | undefined): boolean {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function dedupeRuleIds(ids: string[]): string[] {
@@ -82,6 +97,38 @@ function dedupeRuleIds(ids: string[]): string[] {
   }
 
   return output;
+}
+
+function normalizeSolutionText(value: unknown): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const collapsed = value
+    .replace(/\r?\n+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[*\-\u2022\d).\s]+/, "")
+    .replace(/["'`]/g, "")
+    .trim();
+
+  if (!collapsed) {
+    return "";
+  }
+
+  const firstSentence = collapsed.split(/[.!?。]/)[0]?.trim() ?? "";
+  if (!firstSentence) {
+    return "";
+  }
+
+  const cleaned = firstSentence
+    .replace(/(해야 합니다|해야 한다|필요합니다|필요하다|점검|개선|확보)$/g, "")
+    .trim();
+
+  if (!cleaned) {
+    return "";
+  }
+
+  return cleaned.slice(0, 48);
 }
 
 function tryParseJson(content: string): Record<string, unknown> | null {
@@ -136,6 +183,21 @@ function normalizeClassification(value: Record<string, unknown>): LlmPostClassif
       ? Math.max(0, Math.min(1, rawConfidence))
       : 0,
     reason: typeof value.reason === "string" ? value.reason.slice(0, 280) : "",
+    solution: normalizeSolutionText(value.solution),
+  };
+}
+
+function mergeMissingFieldsOnly(
+  cached: LlmPostClassification,
+  fresh: LlmPostClassification,
+): LlmPostClassification {
+  return {
+    isProblem: cached.isProblem,
+    ruleIds: cached.ruleIds.length > 0 ? cached.ruleIds : fresh.ruleIds,
+    severity: cached.severity,
+    confidence: cached.confidence,
+    reason: hasText(cached.reason) ? cached.reason : fresh.reason,
+    solution: hasText(cached.solution) ? cached.solution : fresh.solution,
   };
 }
 
@@ -206,9 +268,7 @@ export async function analyzeProblemsFromPosts(
   }
 
   const forceFullPass = options.forceFullPass === true;
-  const runtimeLimitMs = forceFullPass
-    ? Number.POSITIVE_INFINITY
-    : LLM_MAX_RUNTIME_MS;
+  const runtimeLimitMs = forceFullPass ? Number.POSITIVE_INFINITY : LLM_MAX_RUNTIME_MS;
 
   const cache = await readLlmCache();
   let cacheChanged = false;
@@ -228,38 +288,50 @@ export async function analyzeProblemsFromPosts(
     const signature = buildPostSignature(post.title, post.body);
 
     let classification: LlmPostClassification | null = null;
-    const cached = cache.entries[post.id];
 
-    if (
-      cached &&
-      cached.model === CACHE_MODEL_KEY &&
-      cached.signature === signature
-    ) {
-      classification = cached.result;
-    } else {
-      const candidate = regexRuleIds.length > 0 || looksLikePainPoint(text);
-      const runtimeExceeded = Date.now() - startedAt >= runtimeLimitMs;
+    const cachedEntry = cache.entries[post.id];
+    const cachedMatchesSignature = cachedEntry && cachedEntry.signature === signature;
+    const cachedResult = cachedMatchesSignature ? cachedEntry.result : null;
 
-      if (runtimeExceeded) {
-        llmAvailable = false;
-      }
+    if (cachedResult) {
+      classification = cachedResult;
+    }
 
-      if (candidate && llmAvailable && budget > 0) {
-        try {
-          classification = await classifyPostWithOllama(post, regexRuleIds);
-          if (classification) {
-            cache.entries[post.id] = {
-              model: CACHE_MODEL_KEY,
-              signature,
-              updatedAt: new Date().toISOString(),
-              result: classification,
-            };
-            cacheChanged = true;
-          }
-          budget -= 1;
-        } catch {
-          llmAvailable = false;
+    const missingReason = !cachedResult || !hasText(cachedResult.reason);
+    const missingSolution = !cachedResult || !hasText(cachedResult.solution);
+    const hasMissingTextField = missingReason || missingSolution;
+    const shouldBackfillMissing = cachedResult?.isProblem === true && hasMissingTextField;
+    const shouldClassifyFresh = !cachedResult;
+
+    const candidate = regexRuleIds.length > 0 || looksLikePainPoint(text);
+    const shouldAttemptLlm = shouldClassifyFresh ? candidate : shouldBackfillMissing;
+
+    const runtimeExceeded = Date.now() - startedAt >= runtimeLimitMs;
+    if (runtimeExceeded) {
+      llmAvailable = false;
+    }
+
+    if (shouldAttemptLlm && llmAvailable && budget > 0) {
+      try {
+        const freshClassification = await classifyPostWithOllama(post, regexRuleIds);
+
+        if (freshClassification) {
+          classification = cachedResult
+            ? mergeMissingFieldsOnly(cachedResult, freshClassification)
+            : freshClassification;
+
+          cache.entries[post.id] = {
+            model: CACHE_MODEL_KEY,
+            signature,
+            updatedAt: new Date().toISOString(),
+            result: classification,
+          };
+          cacheChanged = true;
         }
+
+        budget -= 1;
+      } catch {
+        llmAvailable = false;
       }
     }
 
@@ -283,8 +355,12 @@ export async function analyzeProblemsFromPosts(
     }
 
     const llmReason =
-      classification && classification.isProblem && classification.reason
+      classification && classification.isProblem && hasText(classification.reason)
         ? classification.reason
+        : undefined;
+    const llmSolution =
+      classification && classification.isProblem && hasText(classification.solution)
+        ? classification.solution
         : undefined;
 
     const signals: PostProblemSignal[] = finalRuleIds.map((ruleId) => ({
@@ -293,6 +369,7 @@ export async function analyzeProblemsFromPosts(
       evidence: post.title,
       sourceUrl: post.permalink,
       llmReason,
+      llmSolution,
     }));
 
     signalsByPost.set(post.id, signals);

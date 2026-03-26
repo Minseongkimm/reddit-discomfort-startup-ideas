@@ -8,6 +8,7 @@ export type LlmPostClassification = {
   severity: number;
   confidence: number;
   reason: string;
+  solution: string;
 };
 
 export type LlmCacheEntry = {
@@ -57,6 +58,7 @@ function normalizeResult(value: unknown): LlmPostClassification {
       severity: 3,
       confidence: 0,
       reason: "",
+      solution: "",
     };
   }
 
@@ -70,6 +72,7 @@ function normalizeResult(value: unknown): LlmPostClassification {
     severity: Math.round(normalizeNumber(candidate.severity, 3, 1, 5)),
     confidence: normalizeNumber(candidate.confidence, 0, 0, 1),
     reason: typeof candidate.reason === "string" ? candidate.reason : "",
+    solution: typeof candidate.solution === "string" ? candidate.solution : "",
   };
 }
 

@@ -253,7 +253,8 @@
 }
 
 .evidenceLabel,
-.llmLabel {
+.llmLabel,
+.solutionLabel {
   margin: 4px 0 0;
   width: fit-content;
   display: inline-flex;
@@ -271,11 +272,13 @@
   font-weight: 800;
 }
 
-.llmLabel {
+.llmLabel,
+.solutionLabel {
   font-weight: 700;
 }
 
-.llmReason {
+.llmReason,
+.solutionText {
   margin: 0;
   color: #1f2937;
   font-size: 11px;

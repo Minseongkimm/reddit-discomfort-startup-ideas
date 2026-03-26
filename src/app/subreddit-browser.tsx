@@ -182,7 +182,13 @@ export default function SubredditBrowser({ results }: SubredditBrowserProps) {
                 <p
                   className={`${styles.llmReason} ${problem.llmReason ? "" : styles.llmReasonEmpty}`.trim()}
                 >
-                  {problem.llmReason ? problem.llmReason : "없음 (분류 대기 가능)"}
+                  {problem.llmReason ? problem.llmReason : "없음(생성 전)"}
+                </p>
+                <p className={styles.solutionLabel}>솔루션 제안</p>
+                <p
+                  className={`${styles.solutionText} ${problem.llmSolution ? "" : styles.llmReasonEmpty}`.trim()}
+                >
+                  {problem.llmSolution ? problem.llmSolution : "없음(생성 전)"}
                 </p>
                 <a
                   href={problem.sourceUrl}

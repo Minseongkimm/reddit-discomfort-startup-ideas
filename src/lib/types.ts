@@ -35,6 +35,7 @@ export type ProblemItem = {
   evidence: string;
   sourceUrl: string;
   llmReason?: string;
+  llmSolution?: string;
 };
 
 export type SubredditResult = {

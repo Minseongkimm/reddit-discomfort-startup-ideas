@@ -13,6 +13,7 @@ export type PostProblemSignal = {
   evidence?: string;
   sourceUrl?: string;
   llmReason?: string;
+  llmSolution?: string;
 };
 
 export const PROBLEM_RULES: ProblemRule[] = [
@@ -152,6 +153,7 @@ export function aggregateProblemsFromSignals(
           evidence: signal.evidence ?? post.title,
           sourceUrl: signal.sourceUrl ?? post.permalink,
           llmReason: signal.llmReason,
+          llmSolution: signal.llmSolution,
         });
         continue;
       }
@@ -166,6 +168,7 @@ export function aggregateProblemsFromSignals(
         frequency: nextFrequency,
         severity: averagedSeverity,
         llmReason: existing.llmReason ?? signal.llmReason,
+        llmSolution: existing.llmSolution ?? signal.llmSolution,
       });
     }
   }
