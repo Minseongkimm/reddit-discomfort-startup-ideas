@@ -19,27 +19,11 @@ export default async function Home() {
           {data.mode === "sample" ? (
             <p className={styles.syncStatus}>샘플 모드 실행 중</p>
           ) : null}
+          <p className={styles.topSummary}>
+            스캔 {data.scannedPostCount} · 문제 {data.totalProblems} · 활성 {data.activeSubredditCount}/{targets.length}
+          </p>
           <RefreshButton className={styles.refreshButton} />
         </div>
-
-        <section className={styles.statsGrid}>
-          <article className={styles.statCard}>
-            <span>스캔 게시글</span>
-            <strong>{data.scannedPostCount}</strong>
-          </article>
-          <article className={styles.statCard}>
-            <span>추출 문제</span>
-            <strong>{data.totalProblems}</strong>
-          </article>
-          <article className={styles.statCard}>
-            <span>활성 서브레딧</span>
-            <strong>{data.activeSubredditCount}</strong>
-          </article>
-          <article className={styles.statCard}>
-            <span>대상 서브레딧</span>
-            <strong>{targets.length}</strong>
-          </article>
-        </section>
 
         <SubredditBrowserShell results={data.results} />
 

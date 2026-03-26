@@ -51,6 +51,19 @@
   cursor: not-allowed;
 }
 
+.topSummary {
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #374151;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .alert {
   background: #fff7ed;
   border: 1px solid #fdba74;
@@ -70,48 +83,13 @@
   line-height: 1.5;
 }
 
-.statsGrid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.statCard {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 14px;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.statCard span {
-  font-size: 13px;
-  color: #6b7280;
-}
-
-.statCard strong {
-  font-size: 26px;
-  color: #111827;
-}
-
-@media (max-width: 1000px) {
-  .statsGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
 @media (max-width: 640px) {
   .page {
     padding: 14px;
   }
 
-  .topBar {
-    justify-content: flex-start;
-  }
-
-  .statsGrid {
-    grid-template-columns: 1fr;
+  .topSummary {
+    white-space: normal;
+    line-height: 1.3;
   }
 }

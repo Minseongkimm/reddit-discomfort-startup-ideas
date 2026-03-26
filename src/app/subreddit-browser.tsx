@@ -10,6 +10,8 @@ type SubredditBrowserProps = {
 
 type SortMode = "problems" | "name";
 
+const EXPAND_BUTTON_THRESHOLD = 8;
+
 function normalizeQuery(value: string) {
   return value.trim().toLowerCase().replace(/^r\//, "");
 }
@@ -21,6 +23,7 @@ export default function SubredditBrowser({ results }: SubredditBrowserProps) {
   );
   const [query, setQuery] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("problems");
+  const [expanded, setExpanded] = useState(false);
 
   const sorted = useMemo(() => {
     const copied = [...results];
@@ -52,9 +55,6 @@ export default function SubredditBrowser({ results }: SubredditBrowserProps) {
     return inFiltered ?? filtered[0] ?? sorted[0];
   }, [filtered, selected, sorted]);
 
-  const currentIndex = current ? filtered.findIndex((item) => item.subreddit === current.subreddit) : -1;
-  const quickCandidates = filtered.slice(0, 10);
-
   if (current == null) {
     return (
       <section className={styles.wrapper}>
@@ -72,13 +72,19 @@ export default function SubredditBrowser({ results }: SubredditBrowserProps) {
           <input
             className={styles.searchInput}
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setExpanded(false);
+            }}
             placeholder="서브레딧 검색 (예: startup, ecommerce)"
           />
           <button
             type="button"
             className={styles.clearButton}
-            onClick={() => setQuery("")}
+            onClick={() => {
+              setQuery("");
+              setExpanded(false);
+            }}
             disabled={query.trim().length === 0}
           >
             초기화
@@ -86,64 +92,80 @@ export default function SubredditBrowser({ results }: SubredditBrowserProps) {
           <p className={styles.selectorHint}>총 {results.length}개</p>
         </div>
 
-        {quickCandidates.length > 0 ? (
-          <div className={styles.quickRow}>
-            {quickCandidates.map((item) => (
-              <button
-                key={item.subreddit}
-                type="button"
-                className={`${styles.quickButton} ${item.subreddit === current.subreddit ? styles.quickActive : ""}`}
-                onClick={() => setSelected(item.subreddit)}
-              >
-                {item.subreddit}
-                <span>{item.problems.length}</span>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <p className={styles.empty}>검색 결과가 없습니다.</p>
-        )}
-
         <div className={styles.selectorControl}>
-          <select
-            className={styles.select}
-            value={current.subreddit}
-            onChange={(event) => setSelected(event.target.value)}
-            disabled={filtered.length === 0}
-          >
-            {filtered.map((item) => (
-              <option key={item.subreddit} value={item.subreddit}>
-                {item.subreddit} · 문제 {item.problems.length}개 · 게시글 {item.scannedPosts}개
-              </option>
-            ))}
-          </select>
+          {filtered.length > 0 ? (
+            <>
+              <div
+                className={`${styles.chipWrap} ${expanded ? styles.chipWrapExpanded : styles.chipWrapCollapsed}`}
+              >
+                {filtered.map((item) => (
+                  <button
+                    key={item.subreddit}
+                    type="button"
+                    className={`${styles.subredditChip} ${item.subreddit === current.subreddit ? styles.subredditChipActive : ""}`}
+                    onClick={() => setSelected(item.subreddit)}
+                  >
+                    <span className={styles.chipName}>{item.subreddit}</span>
+                    <span className={styles.chipCount}>{item.problems.length}</span>
+                  </button>
+                ))}
+              </div>
 
-          <div className={styles.sortRow}>
-            <button
-              type="button"
-              className={`${styles.sortButton} ${sortMode === "problems" ? styles.sortActive : ""}`}
-              onClick={() => setSortMode("problems")}
-            >
-              문제 많은 순
-            </button>
-            <button
-              type="button"
-              className={`${styles.sortButton} ${sortMode === "name" ? styles.sortActive : ""}`}
-              onClick={() => setSortMode("name")}
-            >
-              이름 순
-            </button>
-          </div>
+              <div className={styles.controlRow}>
+                <div className={styles.sortRow}>
+                  <button
+                    type="button"
+                    className={`${styles.sortButton} ${sortMode === "problems" ? styles.sortActive : ""}`}
+                    onClick={() => {
+                      setSortMode("problems");
+                      setExpanded(false);
+                    }}
+                  >
+                    문제 많은 순
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.sortButton} ${sortMode === "name" ? styles.sortActive : ""}`}
+                    onClick={() => {
+                      setSortMode("name");
+                      setExpanded(false);
+                    }}
+                  >
+                    이름 순
+                  </button>
+                </div>
+
+                <div className={styles.expandRow}>
+                  {!expanded && filtered.length > EXPAND_BUTTON_THRESHOLD ? (
+                    <button
+                      type="button"
+                      className={styles.moreButton}
+                      onClick={() => setExpanded(true)}
+                    >
+                      더보기
+                    </button>
+                  ) : null}
+                  {expanded ? (
+                    <button
+                      type="button"
+                      className={styles.collapseButton}
+                      onClick={() => setExpanded(false)}
+                    >
+                      닫기
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </>
+          ) : (
+            <p className={styles.empty}>검색 결과가 없습니다.</p>
+          )}
         </div>
       </div>
 
       <article className={styles.detailArea}>
         <header className={styles.detailHeader}>
           <h2>{current.subreddit}</h2>
-          <p>
-            스캔 게시글 {current.scannedPosts}개 · 추출 문제 {current.problems.length}개
-            {filtered.length > 0 ? ` · ${Math.max(currentIndex, 0) + 1}/${filtered.length}` : ""}
-          </p>
         </header>
 
         {current.problems.length === 0 ? (
