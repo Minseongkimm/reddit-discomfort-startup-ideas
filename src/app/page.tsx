@@ -25,7 +25,7 @@ export default async function Home() {
           <RefreshButton className={styles.refreshButton} />
         </div>
 
-        <SubredditBrowserShell results={data.results} />
+        <SubredditBrowserShell results={data.results} mode={data.mode} />
 
         {data.mode === "empty" && configured === false ? (
           <section className={styles.alert}>

@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { ProblemItem, ProblemSourceItem, SubredditResult } from "@/lib/types";
+import type { DataMode, ProblemItem, ProblemSourceItem, SubredditResult } from "@/lib/types";
 import styles from "./subreddit-browser.module.css";
 
 type SubredditBrowserProps = {
   results: SubredditResult[];
+  mode: DataMode;
 };
 
 type SortMode = "problems" | "name";
@@ -44,6 +45,43 @@ function getPainToneClass(score: number | null) {
     return styles.painLow;
   }
   return styles.painMinimal;
+}
+
+function getSamplePainFallback(problem: ProblemItem): number {
+  const mentionCount = problem.mentionCount ?? problem.frequency;
+  const score = problem.totalScore ?? 0;
+  const comments = problem.totalComments ?? 0;
+  const engagement = Math.max(0, score) + Math.max(0, comments) * 2;
+
+  if (mentionCount >= 10 || engagement >= 600) {
+    return 100;
+  }
+  if (mentionCount >= 7 || engagement >= 360) {
+    return 80;
+  }
+  if (mentionCount >= 4 || engagement >= 180) {
+    return 60;
+  }
+  if (mentionCount >= 2 || engagement >= 80) {
+    return 40;
+  }
+  return 20;
+}
+
+function getDisplayPainScore(problem: ProblemItem, mode: DataMode): number | null {
+  const normalized = normalizePainScore(
+    Number.isFinite(problem.painIndex) ? problem.painIndex : null,
+  );
+
+  if (normalized !== null) {
+    return normalized;
+  }
+
+  if (mode === "sample") {
+    return getSamplePainFallback(problem);
+  }
+
+  return null;
 }
 
 function getProblemSources(problem: ProblemItem): ProblemSourceItem[] {
@@ -104,7 +142,7 @@ function writeFeedbackMap(next: Record<string, FeedbackValue>) {
   }
 }
 
-export default function SubredditBrowser({ results }: SubredditBrowserProps) {
+export default function SubredditBrowser({ results, mode }: SubredditBrowserProps) {
   const [selected, setSelected] = useState(() =>
     results.find((item) => item.problems.some((problem) => Boolean(problem.llmReason?.trim())))
       ?.subreddit ?? results[0]?.subreddit ?? "",
@@ -222,8 +260,8 @@ export default function SubredditBrowser({ results }: SubredditBrowserProps) {
     }
 
     const sortByPainDesc = (a: ProblemItem, b: ProblemItem) => {
-      const aPain = normalizePainScore(Number.isFinite(a.painIndex) ? a.painIndex : null) ?? 0;
-      const bPain = normalizePainScore(Number.isFinite(b.painIndex) ? b.painIndex : null) ?? 0;
+      const aPain = getDisplayPainScore(a, mode) ?? 0;
+      const bPain = getDisplayPainScore(b, mode) ?? 0;
       const aMentions = a.mentionCount ?? a.frequency;
       const bMentions = b.mentionCount ?? b.frequency;
 
@@ -241,7 +279,7 @@ export default function SubredditBrowser({ results }: SubredditBrowserProps) {
       primary: [...liked, ...neutral],
       disliked,
     };
-  }, [current, feedbackByProblem]);
+  }, [current, feedbackByProblem, mode]);
 
   const renderProblemCard = (problem: ProblemItem) => {
     const sources = getProblemSources(problem);
@@ -251,8 +289,7 @@ export default function SubredditBrowser({ results }: SubredditBrowserProps) {
     const totalScore = problem.totalScore ?? 0;
     const totalComments = problem.totalComments ?? 0;
     const empathyScore = problem.empathyScore ?? totalScore + totalComments * 2;
-    const painIndex = Number.isFinite(problem.painIndex) ? problem.painIndex : null;
-    const painScore = normalizePainScore(painIndex);
+    const painScore = getDisplayPainScore(problem, mode);
     const painToneClass = getPainToneClass(painScore);
 
     return (
@@ -292,9 +329,9 @@ export default function SubredditBrowser({ results }: SubredditBrowserProps) {
           </div>
         </div>
         <p className={styles.meta}>
-          언급 {mentionCount} · 고통 지수
+          언급 {mentionCount} ·
           <span className={[styles.painValue, painToneClass].join(" ").trim()}>
-            {painScore !== null ? painScore : "-"}
+            고통지수 {painScore !== null ? painScore : "-"}
           </span>
         </p>
         <p className={styles.metaSub}>공감 {empathyScore} (점수 {totalScore} · 댓글 {totalComments})</p>
@@ -465,6 +502,14 @@ export default function SubredditBrowser({ results }: SubredditBrowserProps) {
         <header className={styles.detailHeader}>
           <h2>{current.subreddit}</h2>
         </header>
+
+                <div className={styles.painLegend}>
+          <span className={styles.painLegendTitle}>고통지수 예시</span>
+          <span className={[styles.painValue, styles.painMinimal].join(" ")}>10점 - 만들지마</span>
+          <span className={[styles.painValue, styles.painLow].join(" ")}>40점 - 낮은 우선순위</span>
+          <span className={[styles.painValue, styles.painHigh].join(" ")}>70점 - 검토 필요</span>
+          <span className={[styles.painValue, styles.painCritical].join(" ")}>100점 - 꼭 만들어줘</span>
+        </div>
 
         {toast ? (
           <p

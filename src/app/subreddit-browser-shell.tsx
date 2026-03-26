@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import type { SubredditResult } from "@/lib/types";
+import type { DataMode, SubredditResult } from "@/lib/types";
 
 const SubredditBrowser = dynamic(() => import("./subreddit-browser"), {
   ssr: false,
@@ -9,8 +9,9 @@ const SubredditBrowser = dynamic(() => import("./subreddit-browser"), {
 
 type Props = {
   results: SubredditResult[];
+  mode: DataMode;
 };
 
-export default function SubredditBrowserShell({ results }: Props) {
-  return <SubredditBrowser results={results} />;
+export default function SubredditBrowserShell({ results, mode }: Props) {
+  return <SubredditBrowser results={results} mode={mode} />;
 }
