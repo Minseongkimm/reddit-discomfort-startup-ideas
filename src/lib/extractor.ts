@@ -1,4 +1,4 @@
-import type { ProblemItem, StoredPost, SubredditResult } from "./types";
+import type { ProblemItem, ProblemSourceItem, StoredPost, SubredditResult } from "./types";
 
 export type ProblemRule = {
   id: string;
@@ -106,6 +106,80 @@ export function calculateSeverity(post: StoredPost) {
   return 1;
 }
 
+function toSourceItem(signal: PostProblemSignal, post: StoredPost): ProblemSourceItem {
+  return {
+    url: signal.sourceUrl ?? post.permalink,
+    evidence: signal.evidence ?? post.title,
+  };
+}
+
+function mergeSources(existing: ProblemSourceItem[] | undefined, next: ProblemSourceItem) {
+  const output: ProblemSourceItem[] = existing ? [...existing] : [];
+  const nextUrl = next.url.trim();
+
+  if (nextUrl.length === 0) {
+    return output;
+  }
+
+  const alreadyExists = output.some((item) => item.url === nextUrl);
+  if (!alreadyExists) {
+    output.push({
+      url: nextUrl,
+      evidence: next.evidence,
+    });
+  }
+
+  return output;
+}
+
+function normalizeByRange(value: number, min: number, max: number) {
+  if (!Number.isFinite(value) || !Number.isFinite(min) || !Number.isFinite(max)) {
+    return 0;
+  }
+
+  if (max <= min) {
+    return 1;
+  }
+
+  return (value - min) / (max - min);
+}
+
+function applyPainIndex(problems: ProblemItem[]): ProblemItem[] {
+  if (problems.length === 0) {
+    return problems;
+  }
+
+  const mentionSignals = problems.map((problem) => {
+    const mentionCount = Math.max(0, problem.mentionCount ?? problem.frequency ?? 0);
+    return Math.log1p(mentionCount);
+  });
+
+  const empathySignals = problems.map((problem) => {
+    const score = Math.max(0, problem.totalScore ?? 0);
+    const comments = Math.max(0, problem.totalComments ?? 0);
+    return Math.log1p(score + comments * 2);
+  });
+
+  const mentionMin = Math.min(...mentionSignals);
+  const mentionMax = Math.max(...mentionSignals);
+  const empathyMin = Math.min(...empathySignals);
+  const empathyMax = Math.max(...empathySignals);
+
+  return problems.map((problem, index) => {
+    const mentionNorm = normalizeByRange(mentionSignals[index] ?? 0, mentionMin, mentionMax);
+    const empathyNorm = normalizeByRange(empathySignals[index] ?? 0, empathyMin, empathyMax);
+    const severityNorm = Math.max(0, Math.min(1, problem.severity / 5));
+
+    const painIndex =
+      100 * (0.45 * mentionNorm + 0.35 * empathyNorm + 0.2 * severityNorm);
+
+    return {
+      ...problem,
+      painIndex: Math.round(painIndex * 10) / 10,
+    };
+  });
+}
+
 export function aggregateProblemsFromSignals(
   posts: StoredPost[],
   getSignals: (post: StoredPost) => PostProblemSignal[],
@@ -144,29 +218,48 @@ export function aggregateProblemsFromSignals(
       const existing = subredditBucket.problems.get(rule.id);
 
       if (!existing) {
+        const source = toSourceItem(signal, post);
+
         subredditBucket.problems.set(rule.id, {
           id: `${post.subreddit}-${rule.id}`,
           statement: rule.label,
           signal: rule.signal,
           frequency: 1,
+          mentionCount: 1,
+          totalScore: post.score,
+          totalComments: post.comments,
+          empathyScore: post.score + post.comments * 2,
+          painIndex: 0,
           severity: signal.severity,
-          evidence: signal.evidence ?? post.title,
-          sourceUrl: signal.sourceUrl ?? post.permalink,
+          evidence: source.evidence,
+          sourceUrl: source.url,
+          sources: source.url ? [source] : [],
           llmReason: signal.llmReason,
           llmSolution: signal.llmSolution,
         });
         continue;
       }
 
-      const nextFrequency = existing.frequency + 1;
+      const prevMentionCount = existing.mentionCount ?? existing.frequency;
+      const nextMentionCount = prevMentionCount + 1;
       const averagedSeverity = Math.round(
-        (existing.severity * existing.frequency + signal.severity) / nextFrequency,
+        (existing.severity * prevMentionCount + signal.severity) / nextMentionCount,
       );
+      const nextTotalScore = (existing.totalScore ?? 0) + post.score;
+      const nextTotalComments = (existing.totalComments ?? 0) + post.comments;
+
+      const source = toSourceItem(signal, post);
 
       subredditBucket.problems.set(rule.id, {
         ...existing,
-        frequency: nextFrequency,
+        frequency: nextMentionCount,
+        mentionCount: nextMentionCount,
+        totalScore: nextTotalScore,
+        totalComments: nextTotalComments,
+        empathyScore: nextTotalScore + nextTotalComments * 2,
+        painIndex: existing.painIndex ?? 0,
         severity: averagedSeverity,
+        sources: mergeSources(existing.sources, source),
         llmReason: existing.llmReason ?? signal.llmReason,
         llmSolution: existing.llmSolution ?? signal.llmSolution,
       });
@@ -174,13 +267,26 @@ export function aggregateProblemsFromSignals(
   }
 
   return Array.from(buckets.entries())
-    .map(([subreddit, bucket]) => ({
-      subreddit,
-      scannedPosts: bucket.scannedPosts,
-      problems: Array.from(bucket.problems.values()).sort(
-        (a, b) => b.frequency - a.frequency || b.severity - a.severity,
-      ),
-    }))
+    .map(([subreddit, bucket]) => {
+      const problems = applyPainIndex(Array.from(bucket.problems.values()));
+
+      problems.sort((a, b) => {
+        const aMentions = a.mentionCount ?? a.frequency;
+        const bMentions = b.mentionCount ?? b.frequency;
+
+        return (
+          bMentions - aMentions ||
+          b.painIndex - a.painIndex ||
+          b.empathyScore - a.empathyScore
+        );
+      });
+
+      return {
+        subreddit,
+        scannedPosts: bucket.scannedPosts,
+        problems,
+      };
+    })
     .sort((a, b) => b.problems.length - a.problems.length);
 }
 

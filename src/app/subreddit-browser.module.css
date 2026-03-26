@@ -182,10 +182,68 @@
   gap: 10px;
 }
 
+.moveToast {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  width: max-content;
+  max-width: min(90vw, 320px);
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 700;
+  z-index: 60;
+  pointer-events: none;
+  animation: toastPop 160ms ease;
+}
+
+.moveToastLike {
+  border: 1px solid #86efac;
+  background: #dcfce7;
+  color: #166534;
+}
+
+.moveToastDislike {
+  border: 1px solid #fca5a5;
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+@keyframes toastPop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 8px));
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+}
+
 .detailHeader h2 {
   margin: 0;
   font-size: 18px;
   color: #111827;
+}
+
+.dislikedSection {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px dashed #d1d5db;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dislikedTitle {
+  margin: 0;
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .problemGrid {
@@ -220,12 +278,32 @@
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
 }
 
+.problemItemLike {
+  border-color: #86efac;
+}
+
+.problemItemDislike {
+  border-color: #fca5a5;
+}
+
+.problemItemLike:hover,
+.problemItemLike:focus-within {
+  border-color: #22c55e;
+}
+
+.problemItemDislike:hover,
+.problemItemDislike:focus-within {
+  border-color: #ef4444;
+}
+
 .statement {
   margin: 0;
   color: #111827;
   font-size: 13px;
   font-weight: 700;
   line-height: 1.35;
+  flex: 1;
+  min-width: 0;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -238,6 +316,48 @@
   font-size: 11px;
   line-height: 1.3;
 }
+
+.painValue {
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.painMinimal {
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+
+.painLow {
+  color: #047857;
+  background: #d1fae5;
+}
+
+.painMedium {
+  color: #a16207;
+  background: #fef3c7;
+}
+
+.painHigh {
+  color: #c2410c;
+  background: #fed7aa;
+}
+
+.painCritical {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+.metaSub {
+  margin: 0;
+  color: #6b7280;
+  font-size: 10px;
+  line-height: 1.25;
+}
+
 
 .evidence {
   margin: 0;
@@ -255,17 +375,11 @@
 .evidenceLabel,
 .llmLabel,
 .solutionLabel {
-  margin: 4px 0 0;
-  width: fit-content;
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid #dbeafe;
-  background: #eef2ff;
+  margin: 6px 0 2px;
   color: #111827;
-  border-radius: 999px;
-  padding: 2px 8px;
   font-size: 10px;
   line-height: 1.2;
+  letter-spacing: 0.01em;
 }
 
 .evidenceLabel {
@@ -278,7 +392,8 @@
 }
 
 .llmReason,
-.solutionText {
+.solutionText,
+.sourceBox {
   margin: 0;
   color: #1f2937;
   font-size: 11px;
@@ -297,11 +412,144 @@
   border-color: #e5e7eb;
 }
 
-.link {
-  margin-top: 2px;
-  color: #1d4ed8;
+.cardTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.feedbackIcons {
+  display: inline-flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.feedbackIconButton {
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition:
+    transform 140ms ease,
+    color 140ms ease,
+    opacity 140ms ease;
+}
+
+.feedbackIconButton svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.feedbackIconButton:hover {
+  transform: translateY(-1px) scale(1.06);
+  color: #374151;
+}
+
+.feedbackIconButton:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.feedbackIconButtonLikeActive {
+  color: #16a34a;
+}
+
+.feedbackIconButtonDislikeActive {
+  color: #dc2626;
+}
+
+.sourceToggle {
+  margin: 4px 0 0;
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #dbeafe;
+  background: #eef2ff;
+  color: #111827;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10px;
+  line-height: 1.2;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sourceChevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
   font-size: 11px;
+  line-height: 1;
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+
+.sourceToggle:hover .sourceChevron {
+  transform: translateY(0.5px);
+}
+
+.sourcePanel {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition:
+    max-height 220ms ease,
+    opacity 180ms ease;
+}
+
+.sourcePanelOpen {
+  max-height: 280px;
+  opacity: 1;
+}
+
+.sourceBox {
+  max-height: 180px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.sourceBox::-webkit-scrollbar {
+  width: 8px;
+}
+
+.sourceBox::-webkit-scrollbar-track {
+  background: #eff6ff;
+  border-radius: 999px;
+}
+
+.sourceBox::-webkit-scrollbar-thumb {
+  background: #bfdbfe;
+  border-radius: 999px;
+}
+
+.sourceEntry {
+  padding: 4px 0;
+}
+
+.sourceEntry + .sourceEntry {
+  border-top: 1px solid #dbeafe;
+  margin-top: 2px;
+  padding-top: 8px;
+}
+
+.sourceTitleLink {
+  display: -webkit-box;
+  color: #1d4ed8;
+  font-size: 10px;
+  line-height: 1.35;
   text-decoration: none;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .empty {
@@ -317,6 +565,17 @@
 
   .problemItem:hover,
   .problemItem:focus-within {
+    transform: none;
+  }
+
+  .sourceChevron,
+  .sourcePanel,
+  .feedbackIconButton {
+    transition: none;
+  }
+
+  .feedbackIconButton:hover,
+  .feedbackIconButton:active {
     transform: none;
   }
 }

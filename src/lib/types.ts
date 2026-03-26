@@ -26,14 +26,25 @@ export type RedditStore = {
   posts: Record<string, StoredPost>;
 };
 
+export type ProblemSourceItem = {
+  url: string;
+  evidence: string;
+};
+
 export type ProblemItem = {
   id: string;
   statement: string;
   signal: string;
   frequency: number;
+  mentionCount: number;
+  totalScore: number;
+  totalComments: number;
+  empathyScore: number;
+  painIndex: number;
   severity: number;
   evidence: string;
   sourceUrl: string;
+  sources?: ProblemSourceItem[];
   llmReason?: string;
   llmSolution?: string;
 };

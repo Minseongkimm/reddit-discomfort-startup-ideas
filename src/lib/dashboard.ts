@@ -11,6 +11,12 @@ function isSnapshotFresh(snapshot: DashboardData, expected: { lastSyncAt: string
   );
 }
 
+function hasPainIndexCoverage(snapshot: DashboardData): boolean {
+  return snapshot.results.every((subreddit) =>
+    subreddit.problems.every((problem) => Number.isFinite(problem.painIndex)),
+  );
+}
+
 function buildDashboardData(params: {
   lastSyncAt: string | null;
   mode: DashboardData["mode"];
@@ -59,7 +65,7 @@ export async function getDashboardData(): Promise<DashboardData> {
   };
 
   const snapshot = await readDashboardSnapshot();
-  if (snapshot && isSnapshotFresh(snapshot, expected)) {
+  if (snapshot && isSnapshotFresh(snapshot, expected) && hasPainIndexCoverage(snapshot)) {
     return snapshot;
   }
 
