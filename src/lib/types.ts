@@ -31,6 +31,15 @@ export type ProblemSourceItem = {
   evidence: string;
 };
 
+export type ProblemServiceItem = {
+  name: string;
+  url: string;
+  resolvedUrl?: string;
+  summary?: string;
+  verification?: "verified" | "failed" | "missing" | "unchecked";
+  checkedAt?: string;
+};
+
 export type ProblemItem = {
   id: string;
   statement: string;
@@ -45,6 +54,7 @@ export type ProblemItem = {
   evidence: string;
   sourceUrl: string;
   sources?: ProblemSourceItem[];
+  similarServices?: ProblemServiceItem[];
   llmReason?: string;
   llmSolution?: string;
 };

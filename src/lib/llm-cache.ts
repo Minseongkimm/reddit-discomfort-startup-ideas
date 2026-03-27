@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { ProblemServiceItem } from "./types";
 
 export type LlmPostClassification = {
   isProblem: boolean;
@@ -9,6 +10,7 @@ export type LlmPostClassification = {
   confidence: number;
   reason: string;
   solution: string;
+  similarServices: ProblemServiceItem[];
 };
 
 export type LlmCacheEntry = {
@@ -50,6 +52,118 @@ function normalizeNumber(
   return clamped;
 }
 
+function normalizeServiceText(value: unknown): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function normalizeServiceItem(value: unknown): ProblemServiceItem | null {
+  if (typeof value === "string") {
+    const name = normalizeServiceText(value).slice(0, 80);
+    if (!name) {
+      return null;
+    }
+
+    return {
+      name,
+      url: "",
+      verification: "missing",
+    };
+  }
+
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const rawName =
+    normalizeServiceText(candidate.name) ||
+    normalizeServiceText(candidate.service) ||
+    normalizeServiceText(candidate.company) ||
+    normalizeServiceText(candidate.title);
+  const rawUrl =
+    normalizeServiceText(candidate.url) ||
+    normalizeServiceText(candidate.website) ||
+    normalizeServiceText(candidate.link) ||
+    normalizeServiceText(candidate.homepage);
+  const rawResolvedUrl =
+    normalizeServiceText(candidate.resolvedUrl) ||
+    normalizeServiceText(candidate.resolved_url);
+  const summary =
+    normalizeServiceText(candidate.summary) ||
+    normalizeServiceText(candidate.description) ||
+    normalizeServiceText(candidate.why) ||
+    normalizeServiceText(candidate.note);
+
+  const name = rawName || (rawUrl ? rawUrl.replace(/^https?:\/\//, "").split("/")[0] : "");
+  if (!name && !rawUrl) {
+    return null;
+  }
+
+  const rawVerification = normalizeServiceText(candidate.verification).toLowerCase();
+  const verification =
+    rawVerification === "verified" ||
+    rawVerification === "failed" ||
+    rawVerification === "missing" ||
+    rawVerification === "unchecked"
+      ? rawVerification
+      : rawUrl
+        ? "unchecked"
+        : "missing";
+
+  const item: ProblemServiceItem = {
+    name: name.slice(0, 80),
+    url: rawUrl.slice(0, 220),
+    resolvedUrl: rawResolvedUrl.slice(0, 220) || undefined,
+    verification,
+    checkedAt:
+      typeof candidate.checkedAt === "string"
+        ? candidate.checkedAt
+        : typeof candidate.checked_at === "string"
+          ? candidate.checked_at
+          : undefined,
+  };
+
+  if (summary) {
+    item.summary = summary.slice(0, 180);
+  }
+
+  return item;
+}
+
+function normalizeSimilarServices(value: unknown): ProblemServiceItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const output: ProblemServiceItem[] = [];
+
+  for (const raw of value) {
+    const normalized = normalizeServiceItem(raw);
+    if (!normalized) {
+      continue;
+    }
+
+    const key = `${normalized.name.toLowerCase()}::${normalized.url.toLowerCase()}`;
+    const exists = output.some(
+      (item) => `${item.name.toLowerCase()}::${item.url.toLowerCase()}` === key,
+    );
+
+    if (!exists) {
+      output.push(normalized);
+    }
+
+    if (output.length >= 5) {
+      break;
+    }
+  }
+
+  return output;
+}
+
 function normalizeResult(value: unknown): LlmPostClassification {
   if (!value || typeof value !== "object") {
     return {
@@ -59,10 +173,19 @@ function normalizeResult(value: unknown): LlmPostClassification {
       confidence: 0,
       reason: "",
       solution: "",
+      similarServices: [],
     };
   }
 
-  const candidate = value as Partial<LlmPostClassification>;
+  const candidate = value as Partial<LlmPostClassification> & Record<string, unknown>;
+
+  const rawSimilarServices = Array.isArray(candidate.similarServices)
+    ? candidate.similarServices
+    : Array.isArray(candidate.similar_services)
+      ? candidate.similar_services
+      : Array.isArray(candidate.competitors)
+        ? candidate.competitors
+        : [];
 
   return {
     isProblem: Boolean(candidate.isProblem),
@@ -73,6 +196,7 @@ function normalizeResult(value: unknown): LlmPostClassification {
     confidence: normalizeNumber(candidate.confidence, 0, 0, 1),
     reason: typeof candidate.reason === "string" ? candidate.reason : "",
     solution: typeof candidate.solution === "string" ? candidate.solution : "",
+    similarServices: normalizeSimilarServices(rawSimilarServices),
   };
 }
 

@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { DataMode, ProblemItem, ProblemSourceItem, SubredditResult } from "@/lib/types";
+import type {
+  DataMode,
+  ProblemItem,
+  ProblemServiceItem,
+  ProblemSourceItem,
+  SubredditResult,
+} from "@/lib/types";
 import styles from "./subreddit-browser.module.css";
 
 type SubredditBrowserProps = {
@@ -12,6 +18,10 @@ type SubredditBrowserProps = {
 type SortMode = "problems" | "name";
 type FeedbackValue = "like" | "dislike";
 type ToastState = { text: string; key: number; kind: FeedbackValue } | null;
+type LikedProblemEntry = {
+  subreddit: string;
+  problem: ProblemItem;
+};
 
 const EXPAND_BUTTON_THRESHOLD = 8;
 const FEEDBACK_STORAGE_KEY = "reddit-problem-feedback-v1";
@@ -101,6 +111,29 @@ function getProblemSources(problem: ProblemItem): ProblemSourceItem[] {
   return [];
 }
 
+function getProblemServices(problem: ProblemItem): ProblemServiceItem[] {
+  if (!problem.similarServices || problem.similarServices.length === 0) {
+    return [];
+  }
+
+  return problem.similarServices.filter((item) => {
+    const name = item.name.trim();
+    const url = item.url.trim();
+    return name.length > 0 || url.length > 0;
+  });
+}
+
+function compareProblemsByPainDesc(a: ProblemItem, b: ProblemItem, mode: DataMode) {
+  const aPain = getDisplayPainScore(a, mode) ?? 0;
+  const bPain = getDisplayPainScore(b, mode) ?? 0;
+  const aMentions = a.mentionCount ?? a.frequency;
+  const bMentions = b.mentionCount ?? b.frequency;
+
+  return (
+    bPain - aPain || (b.empathyScore ?? 0) - (a.empathyScore ?? 0) || bMentions - aMentions
+  );
+}
+
 function readFeedbackMap(): Record<string, FeedbackValue> {
   if (typeof window === "undefined") {
     return {};
@@ -150,7 +183,9 @@ export default function SubredditBrowser({ results, mode }: SubredditBrowserProp
   const [query, setQuery] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("problems");
   const [expanded, setExpanded] = useState(false);
+  const [showLikedOnly, setShowLikedOnly] = useState(false);
   const [openSources, setOpenSources] = useState<Record<string, boolean>>({});
+  const [openServices, setOpenServices] = useState<Record<string, boolean>>({});
   const [feedbackByProblem, setFeedbackByProblem] = useState<Record<string, FeedbackValue>>(() =>
     readFeedbackMap(),
   );
@@ -259,21 +294,9 @@ export default function SubredditBrowser({ results, mode }: SubredditBrowserProp
       }
     }
 
-    const sortByPainDesc = (a: ProblemItem, b: ProblemItem) => {
-      const aPain = getDisplayPainScore(a, mode) ?? 0;
-      const bPain = getDisplayPainScore(b, mode) ?? 0;
-      const aMentions = a.mentionCount ?? a.frequency;
-      const bMentions = b.mentionCount ?? b.frequency;
-
-      return (
-        bPain - aPain ||
-        (b.empathyScore ?? 0) - (a.empathyScore ?? 0) ||
-        bMentions - aMentions
-      );
-    };
-
-    neutral.sort(sortByPainDesc);
-    disliked.sort(sortByPainDesc);
+    liked.sort((a, b) => compareProblemsByPainDesc(a, b, mode));
+    neutral.sort((a, b) => compareProblemsByPainDesc(a, b, mode));
+    disliked.sort((a, b) => compareProblemsByPainDesc(a, b, mode));
 
     return {
       primary: [...liked, ...neutral],
@@ -281,9 +304,30 @@ export default function SubredditBrowser({ results, mode }: SubredditBrowserProp
     };
   }, [current, feedbackByProblem, mode]);
 
-  const renderProblemCard = (problem: ProblemItem) => {
+  const likedAcrossSubreddits = useMemo(() => {
+    const likedEntries: LikedProblemEntry[] = [];
+
+    for (const result of results) {
+      for (const problem of result.problems) {
+        if (feedbackByProblem[problem.id] === "like") {
+          likedEntries.push({
+            subreddit: result.subreddit,
+            problem,
+          });
+        }
+      }
+    }
+
+    likedEntries.sort((a, b) => compareProblemsByPainDesc(a.problem, b.problem, mode));
+
+    return likedEntries;
+  }, [feedbackByProblem, mode, results]);
+
+  const renderProblemCard = (problem: ProblemItem, sourceSubreddit?: string) => {
     const sources = getProblemSources(problem);
+    const services = getProblemServices(problem);
     const isOpen = Boolean(openSources[problem.id]);
+    const isServiceOpen = Boolean(openServices[problem.id]);
     const feedback = feedbackByProblem[problem.id];
     const mentionCount = problem.mentionCount ?? problem.frequency;
     const totalScore = problem.totalScore ?? 0;
@@ -302,7 +346,12 @@ export default function SubredditBrowser({ results, mode }: SubredditBrowserProp
         ].join(" ").trim()}
       >
         <div className={styles.cardTop}>
-          <p className={styles.statement}>{problem.statement}</p>
+          <div className={styles.cardTitleWrap}>
+            {sourceSubreddit ? (
+              <p className={styles.originSubreddit}>{sourceSubreddit}</p>
+            ) : null}
+            <p className={styles.statement}>{problem.statement}</p>
+          </div>
           <div className={styles.feedbackIcons}>
             <button
               type="button"
@@ -383,6 +432,83 @@ export default function SubredditBrowser({ results, mode }: SubredditBrowserProp
             </div>
           </>
         ) : null}
+
+        <>
+          <button
+            type="button"
+            className={styles.sourceToggle}
+            onClick={() => {
+              setOpenServices((prev) => ({
+                ...prev,
+                [problem.id]: !prev[problem.id],
+              }));
+            }}
+          >
+            유사 서비스 ({services.length})
+            <span className={styles.sourceChevron} aria-hidden>
+              {isServiceOpen ? "▾" : "▸"}
+            </span>
+          </button>
+
+          <div
+            className={`${styles.sourcePanel} ${isServiceOpen ? styles.sourcePanelOpen : ""}`.trim()}
+          >
+            <div className={styles.sourceBox}>
+              {services.length > 0 ? (
+                services.map((service, index) => {
+                  const serviceUrl = (service.resolvedUrl || service.url).trim();
+                  const verification = service.verification || (serviceUrl ? "unchecked" : "missing");
+                  const verificationLabel =
+                    verification === "verified"
+                      ? "검증됨"
+                      : verification === "failed"
+                        ? "접속실패"
+                        : verification === "missing"
+                          ? "URL없음"
+                          : "미검증";
+                  const verificationClass =
+                    verification === "verified"
+                      ? styles.serviceStatusVerified
+                      : verification === "failed"
+                        ? styles.serviceStatusFailed
+                        : verification === "missing"
+                          ? styles.serviceStatusMissing
+                          : styles.serviceStatusUnchecked;
+
+                  return (
+                    <div
+                      key={`${problem.id}-service-${service.name}-${service.url}-${index}`}
+                      className={styles.sourceEntry}
+                    >
+                      <div className={styles.serviceTopRow}>
+                        {serviceUrl ? (
+                          <a
+                            href={serviceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={styles.sourceTitleLink}
+                          >
+                            {service.name || serviceUrl}
+                          </a>
+                        ) : (
+                          <p className={styles.sourceTitleLink}>{service.name}</p>
+                        )}
+                        <p className={`${styles.serviceStatus} ${verificationClass}`.trim()}>
+                          {verificationLabel}
+                        </p>
+                      </div>
+                      {service.summary ? (
+                        <p className={styles.serviceSummary}>{service.summary}</p>
+                      ) : null}
+                    </div>
+                  );
+                })
+              ) : (
+                <p className={styles.serviceSummary}>없음(생성 전)</p>
+              )}
+            </div>
+          </div>
+        </>
       </li>
     );
   };
@@ -438,7 +564,10 @@ export default function SubredditBrowser({ results, mode }: SubredditBrowserProp
                     key={item.subreddit}
                     type="button"
                     className={`${styles.subredditChip} ${item.subreddit === current.subreddit ? styles.subredditChipActive : ""}`}
-                    onClick={() => setSelected(item.subreddit)}
+                    onClick={() => {
+                      setSelected(item.subreddit);
+                      setShowLikedOnly(false);
+                    }}
                   >
                     <span className={styles.chipName}>{item.subreddit}</span>
                     <span className={styles.chipCount}>{item.problems.length}</span>
@@ -489,6 +618,14 @@ export default function SubredditBrowser({ results, mode }: SubredditBrowserProp
                       닫기
                     </button>
                   ) : null}
+                  <button
+                    type="button"
+                    className={`${styles.likeCollectButton} ${showLikedOnly ? styles.likeCollectButtonActive : ""}`}
+                    onClick={() => setShowLikedOnly((prev) => !prev)}
+                    aria-pressed={showLikedOnly}
+                  >
+                    좋아요 모아보기 ({likedAcrossSubreddits.length})
+                  </button>
                 </div>
               </div>
             </>
@@ -500,16 +637,17 @@ export default function SubredditBrowser({ results, mode }: SubredditBrowserProp
 
       <article className={styles.detailArea}>
         <header className={styles.detailHeader}>
-          <h2>{current.subreddit}</h2>
+          <h2>
+            {showLikedOnly ? `좋아요 모아보기 (${likedAcrossSubreddits.length})` : current.subreddit}
+          </h2>
+          <div className={styles.painLegend}>
+            <span className={styles.painLegendTitle}>고통지수 예시</span>
+            <span className={[styles.painValue, styles.painMinimal].join(" ")}>10점 - 만들지마</span>
+            <span className={[styles.painValue, styles.painLow].join(" ")}>40점 - 낮은 우선순위</span>
+            <span className={[styles.painValue, styles.painHigh].join(" ")}>70점 - 검토 필요</span>
+            <span className={[styles.painValue, styles.painCritical].join(" ")}>100점 - 꼭 만들어줘</span>
+          </div>
         </header>
-
-                <div className={styles.painLegend}>
-          <span className={styles.painLegendTitle}>고통지수 예시</span>
-          <span className={[styles.painValue, styles.painMinimal].join(" ")}>10점 - 만들지마</span>
-          <span className={[styles.painValue, styles.painLow].join(" ")}>40점 - 낮은 우선순위</span>
-          <span className={[styles.painValue, styles.painHigh].join(" ")}>70점 - 검토 필요</span>
-          <span className={[styles.painValue, styles.painCritical].join(" ")}>100점 - 꼭 만들어줘</span>
-        </div>
 
         {toast ? (
           <p
@@ -519,12 +657,20 @@ export default function SubredditBrowser({ results, mode }: SubredditBrowserProp
           </p>
         ) : null}
 
-        {!hasAnyProblems ? (
+        {showLikedOnly ? (
+          likedAcrossSubreddits.length > 0 ? (
+            <ul className={styles.problemGrid}>
+              {likedAcrossSubreddits.map((entry) => renderProblemCard(entry.problem, entry.subreddit))}
+            </ul>
+          ) : (
+            <p className={styles.empty}>좋아요한 카드가 아직 없습니다.</p>
+          )
+        ) : !hasAnyProblems ? (
           <p className={styles.empty}>현재 규칙으로는 추출된 문제가 없습니다.</p>
         ) : (
           <>
             {groupedProblems.primary.length > 0 ? (
-              <ul className={styles.problemGrid}>{groupedProblems.primary.map(renderProblemCard)}</ul>
+              <ul className={styles.problemGrid}>{groupedProblems.primary.map((problem) => renderProblemCard(problem))}</ul>
             ) : (
               <p className={styles.empty}>일반 카드가 없습니다. (싫어요 카드만 존재)</p>
             )}
@@ -533,7 +679,7 @@ export default function SubredditBrowser({ results, mode }: SubredditBrowserProp
               <section className={styles.dislikedSection}>
                 <p className={styles.dislikedTitle}>싫어요 모음 ({groupedProblems.disliked.length})</p>
                 <ul className={styles.problemGrid}>
-                  {groupedProblems.disliked.map(renderProblemCard)}
+                  {groupedProblems.disliked.map((problem) => renderProblemCard(problem))}
                 </ul>
               </section>
             ) : null}

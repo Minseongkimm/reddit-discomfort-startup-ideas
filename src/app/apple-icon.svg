@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="PainRadar apple radar icon">
+  <defs>
+    <linearGradient id="bgApple" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#052e16" />
+      <stop offset="100%" stop-color="#14532d" />
+    </linearGradient>
+    <radialGradient id="screenApple" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#22c55e" stop-opacity="0.24" />
+      <stop offset="100%" stop-color="#052e16" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="120" fill="url(#bgApple)" />
+
+  <circle cx="256" cy="256" r="184" fill="url(#screenApple)" />
+  <circle cx="256" cy="256" r="174" fill="none" stroke="#86efac" stroke-width="12" opacity="0.72" />
+  <circle cx="256" cy="256" r="128" fill="none" stroke="#86efac" stroke-width="8" opacity="0.45" />
+  <circle cx="256" cy="256" r="82" fill="none" stroke="#86efac" stroke-width="6" opacity="0.35" />
+
+  <line x1="82" y1="256" x2="430" y2="256" stroke="#bbf7d0" stroke-opacity="0.24" stroke-width="6" />
+  <line x1="256" y1="82" x2="256" y2="430" stroke="#bbf7d0" stroke-opacity="0.24" stroke-width="6" />
+
+  <path d="M256 256 L402 170 A168 168 0 0 1 424 284 Z" fill="#22c55e" fill-opacity="0.3" />
+  <line x1="256" y1="256" x2="406" y2="178" stroke="#4ade80" stroke-width="10" stroke-linecap="round" />
+
+  <circle cx="350" cy="212" r="16" fill="#bbf7d0" />
+  <circle cx="350" cy="212" r="30" fill="none" stroke="#86efac" stroke-opacity="0.55" stroke-width="5" />
+  <circle cx="256" cy="256" r="14" fill="#dcfce7" />
+</svg>

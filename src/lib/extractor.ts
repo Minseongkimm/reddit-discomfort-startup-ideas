@@ -1,4 +1,10 @@
-import type { ProblemItem, ProblemSourceItem, StoredPost, SubredditResult } from "./types";
+import type {
+  ProblemItem,
+  ProblemServiceItem,
+  ProblemSourceItem,
+  StoredPost,
+  SubredditResult,
+} from "./types";
 
 export type ProblemRule = {
   id: string;
@@ -14,6 +20,7 @@ export type PostProblemSignal = {
   sourceUrl?: string;
   llmReason?: string;
   llmSolution?: string;
+  llmSimilarServices?: ProblemServiceItem[];
 };
 
 export const PROBLEM_RULES: ProblemRule[] = [
@@ -81,6 +88,59 @@ export const PROBLEM_RULES: ProblemRule[] = [
 
 const PROBLEM_RULE_BY_ID = new Map(PROBLEM_RULES.map((rule) => [rule.id, rule]));
 
+const RULE_SIMILAR_SERVICES: Record<string, ProblemServiceItem[]> = {
+  message_fragmentation: [
+    { name: "Front", url: "https://front.com", summary: "이메일·채팅·문의 채널 통합" },
+    { name: "Zendesk", url: "https://www.zendesk.com", summary: "멀티채널 고객지원 티켓 관리" },
+    { name: "Intercom", url: "https://www.intercom.com", summary: "대화형 지원 및 인박스 통합" },
+  ],
+  payment_delay: [
+    { name: "Upflow", url: "https://upflow.io", summary: "미수금 추적과 자동 리마인드" },
+    { name: "Bill.com", url: "https://www.bill.com", summary: "청구·수금 자동화" },
+    { name: "Xero", url: "https://www.xero.com", summary: "송장 발행과 결제 추적" },
+  ],
+  manual_ops: [
+    { name: "Zapier", url: "https://zapier.com", summary: "반복 업무 워크플로 자동화" },
+    { name: "Make", url: "https://www.make.com", summary: "노코드 프로세스 자동화" },
+    { name: "n8n", url: "https://n8n.io", summary: "셀프호스팅 가능한 자동화" },
+  ],
+  knowledge_loss: [
+    { name: "Notion", url: "https://www.notion.so", summary: "노트·문서·지식 베이스 정리" },
+    { name: "Confluence", url: "https://www.atlassian.com/software/confluence", summary: "팀 문서와 위키 관리" },
+    { name: "Dovetail", url: "https://dovetail.com", summary: "사용자 리서치 인사이트 관리" },
+  ],
+  onboarding_dropoff: [
+    { name: "Userpilot", url: "https://userpilot.com", summary: "온보딩 가이드와 행동 분석" },
+    { name: "Appcues", url: "https://www.appcues.com", summary: "인앱 온보딩 플로우 구축" },
+    { name: "Pendo", url: "https://www.pendo.io", summary: "제품 사용성 및 활성화 분석" },
+  ],
+  analytics_blindspot: [
+    { name: "Mixpanel", url: "https://mixpanel.com", summary: "퍼널·전환 이벤트 분석" },
+    { name: "Amplitude", url: "https://amplitude.com", summary: "제품 행동 데이터 분석" },
+    { name: "Segment", url: "https://segment.com", summary: "데이터 수집·전달 파이프라인" },
+  ],
+  support_overload: [
+    { name: "Freshdesk", url: "https://www.freshworks.com/freshdesk", summary: "지원 요청 분류와 SLA 관리" },
+    { name: "Help Scout", url: "https://www.helpscout.com", summary: "공동 인박스 기반 고객응대" },
+    { name: "Gorgias", url: "https://www.gorgias.com", summary: "이커머스 고객지원 자동화" },
+  ],
+  tooling_cost: [
+    { name: "Vendr", url: "https://www.vendr.com", summary: "SaaS 구매·갱신 비용 최적화" },
+    { name: "Zylo", url: "https://zylo.com", summary: "SaaS 구독 가시화·정리" },
+    { name: "Tropic", url: "https://www.tropicapp.io", summary: "벤더 관리와 계약 최적화" },
+  ],
+  scope_creep: [
+    { name: "Productive", url: "https://productive.io", summary: "에이전시 프로젝트·수익 관리" },
+    { name: "ClickUp", url: "https://clickup.com", summary: "요구사항·작업 변경 추적" },
+    { name: "Asana", url: "https://asana.com", summary: "프로젝트 일정·업무 범위 관리" },
+  ],
+  inventory_mismatch: [
+    { name: "Cin7", url: "https://www.cin7.com", summary: "재고·주문·채널 동기화" },
+    { name: "SkuVault", url: "https://www.skuvault.com", summary: "창고 재고 정확도 관리" },
+    { name: "ShipHero", url: "https://shiphero.com", summary: "이커머스 주문·재고 운영" },
+  ],
+};
+
 export function getProblemRuleById(ruleId: string): ProblemRule | undefined {
   return PROBLEM_RULE_BY_ID.get(ruleId);
 }
@@ -95,6 +155,61 @@ export function getMatchedProblemRuleIds(text: string): string[] {
   }
 
   return matched;
+}
+
+function getRuleSimilarServices(ruleId: string): ProblemServiceItem[] {
+  const items = RULE_SIMILAR_SERVICES[ruleId] ?? [];
+  return items.map((item) => ({ ...item }));
+}
+
+function mergeServices(
+  existing: ProblemServiceItem[] | undefined,
+  incoming: ProblemServiceItem[] | undefined,
+): ProblemServiceItem[] {
+  const output: ProblemServiceItem[] = existing ? [...existing] : [];
+  const candidates = incoming ?? [];
+
+  for (const candidate of candidates) {
+    const name = candidate.name.trim();
+    const url = candidate.url.trim();
+
+    if (!name && !url) {
+      continue;
+    }
+
+    const key = `${name.toLowerCase()}::${url.toLowerCase()}`;
+    const existingIndex = output.findIndex((item) => {
+      const existingKey = `${item.name.trim().toLowerCase()}::${item.url.trim().toLowerCase()}`;
+      return existingKey === key;
+    });
+
+    if (existingIndex === -1) {
+      output.push({
+        name,
+        url,
+        resolvedUrl: candidate.resolvedUrl,
+        summary: candidate.summary,
+        verification: candidate.verification,
+        checkedAt: candidate.checkedAt,
+      });
+      continue;
+    }
+
+    const current = output[existingIndex];
+    const shouldUpgradeVerification =
+      current.verification !== "verified" && candidate.verification === "verified";
+
+    if (shouldUpgradeVerification) {
+      output[existingIndex] = {
+        ...current,
+        resolvedUrl: candidate.resolvedUrl || current.resolvedUrl,
+        verification: candidate.verification,
+        checkedAt: candidate.checkedAt,
+      };
+    }
+  }
+
+  return output;
 }
 
 export function calculateSeverity(post: StoredPost) {
@@ -234,6 +349,10 @@ export function aggregateProblemsFromSignals(
           evidence: source.evidence,
           sourceUrl: source.url,
           sources: source.url ? [source] : [],
+          similarServices:
+            signal.llmSimilarServices && signal.llmSimilarServices.length > 0
+              ? signal.llmSimilarServices
+              : getRuleSimilarServices(rule.id),
           llmReason: signal.llmReason,
           llmSolution: signal.llmSolution,
         });
@@ -260,6 +379,12 @@ export function aggregateProblemsFromSignals(
         painIndex: existing.painIndex ?? 0,
         severity: averagedSeverity,
         sources: mergeSources(existing.sources, source),
+        similarServices: mergeServices(
+          existing.similarServices,
+          signal.llmSimilarServices && signal.llmSimilarServices.length > 0
+            ? signal.llmSimilarServices
+            : getRuleSimilarServices(rule.id),
+        ),
         llmReason: existing.llmReason ?? signal.llmReason,
         llmSolution: existing.llmSolution ?? signal.llmSolution,
       });

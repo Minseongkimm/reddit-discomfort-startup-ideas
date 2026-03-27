@@ -20,7 +20,7 @@ import {
   writeLlmCache,
   type LlmPostClassification,
 } from "./llm-cache";
-import type { StoredPost, SubredditResult } from "./types";
+import type { ProblemServiceItem, StoredPost, SubredditResult } from "./types";
 
 type OllamaChatResponse = {
   message?: {
@@ -36,8 +36,10 @@ const VALID_RULE_IDS = new Set(PROBLEM_RULES.map((rule) => rule.id));
 const PAIN_HINT_PATTERN =
   /(problem|pain|issue|friction|stuck|struggle|frustrat|delay|miss|chaos|manual|cost|expensive|broken|hard|complaint|refund|cancel|불편|문제|어렵|힘들|안되|누락|지연|비용|반복|버그|환불|클레임)/i;
 
-const CLASSIFIER_PROMPT_VERSION = "summary-v4";
+const CLASSIFIER_PROMPT_VERSION = "summary-v5-services";
 const CACHE_MODEL_KEY = `${OLLAMA_MODEL}:${CLASSIFIER_PROMPT_VERSION}`;
+const SERVICE_VERIFY_TIMEOUT_MS = 4_500;
+const SERVICE_VERIFY_MAX_PER_RUN = 80;
 
 const SYSTEM_PROMPT = `You classify whether a Reddit post describes a real user pain point.
 You must return strict JSON only.
@@ -52,7 +54,14 @@ Output schema:
   "severity": integer 1..5,
   "confidence": number 0..1,
   "reason": string,
-  "solution": string
+  "solution": string,
+  "similar_services": [
+    {
+      "name": string,
+      "url": string,
+      "summary": string
+    }
+  ]
 }
 
 Few-shot style examples for solution:
@@ -65,12 +74,15 @@ Few-shot style examples for solution:
 
 Rules:
 - Use only allowed rule_ids.
-- If not a pain point, set is_problem=false and rule_ids=[].
+- If not a pain point, set is_problem=false and rule_ids=[] and similar_services=[].
 - Pick at most 3 rule_ids.
 - reason must summarize the core user problem in Korean in 1-2 short sentences.
 - solution must be a short Korean product concept (single line, 6~28 chars preferred).
 - solution must be noun-style. Avoid endings like "해야 합니다", "필요", "점검", "개선".
-- Do not use markdown or bullet points in reason or solution.
+- similar_services must include 1~4 real products when is_problem=true.
+- For each similar service, return concise name and one-line Korean summary.
+- If an official URL is uncertain, leave url as empty string.
+- Do not use markdown or bullet points in reason, solution, or summary.
 `;
 
 function looksLikePainPoint(text: string): boolean {
@@ -79,6 +91,10 @@ function looksLikePainPoint(text: string): boolean {
 
 function hasText(value: string | undefined): boolean {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function hasServices(value: ProblemServiceItem[] | undefined): boolean {
+  return Array.isArray(value) && value.length > 0;
 }
 
 function dedupeRuleIds(ids: string[]): string[] {
@@ -131,6 +147,277 @@ function normalizeSolutionText(value: unknown): string {
   return cleaned.slice(0, 48);
 }
 
+function normalizeServiceText(value: unknown): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value
+    .replace(/\r?\n+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/["'`]/g, "")
+    .trim();
+}
+
+function normalizeServiceUrl(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+
+  try {
+    const parsed = new URL(candidate);
+    if (!parsed.hostname || !parsed.hostname.includes(".")) {
+      return "";
+    }
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
+function normalizeSimilarServices(value: unknown): ProblemServiceItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const output: ProblemServiceItem[] = [];
+
+  for (const rawItem of value) {
+    let name = "";
+    let url = "";
+    let summary = "";
+
+    if (typeof rawItem === "string") {
+      name = normalizeServiceText(rawItem);
+    } else if (rawItem && typeof rawItem === "object") {
+      const candidate = rawItem as Record<string, unknown>;
+      name =
+        normalizeServiceText(candidate.name) ||
+        normalizeServiceText(candidate.service) ||
+        normalizeServiceText(candidate.company);
+      url =
+        normalizeServiceText(candidate.url) ||
+        normalizeServiceText(candidate.website) ||
+        normalizeServiceText(candidate.link);
+      summary =
+        normalizeServiceText(candidate.summary) ||
+        normalizeServiceText(candidate.description) ||
+        normalizeServiceText(candidate.why);
+    }
+
+    name = name.slice(0, 80);
+    url = normalizeServiceUrl(url.slice(0, 220));
+    summary = summary.slice(0, 180);
+
+    if (!name && !url) {
+      continue;
+    }
+
+    const normalizedName = name || url.replace(/^https?:\/\//, "").split("/")[0];
+    const dedupeKey = `${normalizedName.toLowerCase()}::${url.toLowerCase()}`;
+
+    const exists = output.some(
+      (service) => `${service.name.toLowerCase()}::${service.url.toLowerCase()}` === dedupeKey,
+    );
+
+    if (!exists) {
+      output.push({
+        name: normalizedName,
+        url,
+        summary: summary || undefined,
+        verification: url ? "unchecked" : "missing",
+      });
+    }
+
+    if (output.length >= 4) {
+      break;
+    }
+  }
+
+  return output;
+}
+
+function needsServiceVerification(services: ProblemServiceItem[]): boolean {
+  return services.some((service) => {
+    if (!service.url.trim()) {
+      return false;
+    }
+
+    return service.verification !== "verified" && service.verification !== "failed";
+  });
+}
+
+async function verifyService(service: ProblemServiceItem): Promise<ProblemServiceItem> {
+  const checkedAt = new Date().toISOString();
+  const normalizedUrl = normalizeServiceUrl(service.resolvedUrl || service.url);
+
+  if (!normalizedUrl) {
+    return {
+      ...service,
+      verification: "missing",
+      checkedAt,
+    };
+  }
+
+  const verifyWithMethod = async (method: "HEAD" | "GET") => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), SERVICE_VERIFY_TIMEOUT_MS);
+
+    try {
+      return await fetch(normalizedUrl, {
+        method,
+        redirect: "follow",
+        signal: controller.signal,
+        headers:
+          method === "GET"
+            ? {
+                accept: "text/html,application/xhtml+xml",
+              }
+            : undefined,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
+  try {
+    let response = await verifyWithMethod("HEAD");
+
+    if (!response.ok || response.status >= 500 || response.status === 405) {
+      response = await verifyWithMethod("GET");
+    }
+
+    const reachable = response.status > 0 && response.status < 500;
+
+    return {
+      ...service,
+      url: normalizedUrl,
+      resolvedUrl: response.url || normalizedUrl,
+      verification: reachable ? "verified" : "failed",
+      checkedAt,
+    };
+  } catch {
+    return {
+      ...service,
+      url: normalizedUrl,
+      verification: "failed",
+      checkedAt,
+    };
+  }
+}
+
+async function verifySimilarServices(services: ProblemServiceItem[]): Promise<ProblemServiceItem[]> {
+  return Promise.all(services.map((service) => verifyService(service)));
+}
+
+function getServiceVerificationUrl(service: ProblemServiceItem): string {
+  return normalizeServiceUrl(service.resolvedUrl || service.url);
+}
+
+function needsSingleServiceVerification(service: ProblemServiceItem): boolean {
+  const url = getServiceVerificationUrl(service);
+  if (!url) {
+    return false;
+  }
+
+  return service.verification !== "verified" && service.verification !== "failed";
+}
+
+async function verifyServicesInResults(results: SubredditResult[]): Promise<SubredditResult[]> {
+  const pendingByUrl = new Map<string, ProblemServiceItem>();
+
+  outer: for (const subreddit of results) {
+    for (const problem of subreddit.problems) {
+      const services = problem.similarServices ?? [];
+
+      for (const service of services) {
+        if (!needsSingleServiceVerification(service)) {
+          continue;
+        }
+
+        const url = getServiceVerificationUrl(service);
+        if (!url || pendingByUrl.has(url)) {
+          continue;
+        }
+
+        pendingByUrl.set(url, {
+          ...service,
+          url,
+        });
+
+        if (pendingByUrl.size >= SERVICE_VERIFY_MAX_PER_RUN) {
+          break outer;
+        }
+      }
+    }
+  }
+
+  const verifiedByUrl = new Map<string, ProblemServiceItem>();
+  await Promise.all(
+    Array.from(pendingByUrl.entries()).map(async ([url, service]) => {
+      const verified = await verifyService(service);
+      verifiedByUrl.set(url, verified);
+    }),
+  );
+
+  return results.map((subreddit) => ({
+    ...subreddit,
+    problems: subreddit.problems.map((problem) => {
+      const services = problem.similarServices ?? [];
+      if (services.length === 0) {
+        return problem;
+      }
+
+      const nextServices = services.map((service) => {
+        const url = getServiceVerificationUrl(service);
+
+        if (!url) {
+          if (service.verification) {
+            return service;
+          }
+
+          return {
+            ...service,
+            verification: "missing" as const,
+          };
+        }
+
+        const verified = verifiedByUrl.get(url);
+        if (verified) {
+          return {
+            ...service,
+            url: verified.url,
+            resolvedUrl: verified.resolvedUrl || service.resolvedUrl,
+            verification: verified.verification,
+            checkedAt: verified.checkedAt,
+          };
+        }
+
+        if (needsSingleServiceVerification(service)) {
+          return {
+            ...service,
+            url,
+            verification: "unchecked" as const,
+          };
+        }
+
+        return {
+          ...service,
+          url,
+        };
+      });
+
+      return {
+        ...problem,
+        similarServices: nextServices,
+      };
+    }),
+  }));
+}
+
 function tryParseJson(content: string): Record<string, unknown> | null {
   const trimmed = content.trim();
 
@@ -173,6 +460,14 @@ function normalizeClassification(value: Record<string, unknown>): LlmPostClassif
       ? value.confidence
       : Number.parseFloat(String(value.confidence ?? "0"));
 
+  const rawSimilarServices = Array.isArray(value.similar_services)
+    ? value.similar_services
+    : Array.isArray(value.similarServices)
+      ? value.similarServices
+      : Array.isArray(value.competitors)
+        ? value.competitors
+        : [];
+
   return {
     isProblem: Boolean(value.is_problem),
     ruleIds: dedupeRuleIds(rawRuleIds),
@@ -184,6 +479,7 @@ function normalizeClassification(value: Record<string, unknown>): LlmPostClassif
       : 0,
     reason: typeof value.reason === "string" ? value.reason.slice(0, 280) : "",
     solution: normalizeSolutionText(value.solution),
+    similarServices: normalizeSimilarServices(rawSimilarServices),
   };
 }
 
@@ -198,6 +494,9 @@ function mergeMissingFieldsOnly(
     confidence: cached.confidence,
     reason: hasText(cached.reason) ? cached.reason : fresh.reason,
     solution: hasText(cached.solution) ? cached.solution : fresh.solution,
+    similarServices: hasServices(cached.similarServices)
+      ? cached.similarServices
+      : fresh.similarServices,
   };
 }
 
@@ -264,7 +563,8 @@ export async function analyzeProblemsFromPosts(
   options: AnalyzeOptions = {},
 ): Promise<SubredditResult[]> {
   if (!LLM_CLASSIFIER_ENABLED) {
-    return extractProblemsFromPosts(posts);
+    const extracted = extractProblemsFromPosts(posts);
+    return verifyServicesInResults(extracted);
   }
 
   const forceFullPass = options.forceFullPass === true;
@@ -275,6 +575,7 @@ export async function analyzeProblemsFromPosts(
   let budget = forceFullPass
     ? Number.MAX_SAFE_INTEGER
     : LLM_MAX_NEW_CLASSIFICATIONS_PER_RUN;
+  let verifyBudget = forceFullPass ? Number.MAX_SAFE_INTEGER : SERVICE_VERIFY_MAX_PER_RUN;
   let llmAvailable = true;
   const startedAt = Date.now();
 
@@ -299,7 +600,8 @@ export async function analyzeProblemsFromPosts(
 
     const missingReason = !cachedResult || !hasText(cachedResult.reason);
     const missingSolution = !cachedResult || !hasText(cachedResult.solution);
-    const hasMissingTextField = missingReason || missingSolution;
+    const missingSimilarServices = !cachedResult || !hasServices(cachedResult.similarServices);
+    const hasMissingTextField = missingReason || missingSolution || missingSimilarServices;
     const shouldBackfillMissing = cachedResult?.isProblem === true && hasMissingTextField;
     const shouldClassifyFresh = !cachedResult;
 
@@ -335,6 +637,32 @@ export async function analyzeProblemsFromPosts(
       }
     }
 
+    if (
+      classification &&
+      classification.isProblem &&
+      hasServices(classification.similarServices) &&
+      verifyBudget > 0 &&
+      needsServiceVerification(classification.similarServices)
+    ) {
+      try {
+        classification = {
+          ...classification,
+          similarServices: await verifySimilarServices(classification.similarServices),
+        };
+
+        cache.entries[post.id] = {
+          model: CACHE_MODEL_KEY,
+          signature,
+          updatedAt: new Date().toISOString(),
+          result: classification,
+        };
+        cacheChanged = true;
+        verifyBudget -= 1;
+      } catch {
+        // Ignore verification errors and keep raw model output.
+      }
+    }
+
     let finalRuleIds = [...regexRuleIds];
     let finalSeverity = baseSeverity;
 
@@ -362,6 +690,10 @@ export async function analyzeProblemsFromPosts(
       classification && classification.isProblem && hasText(classification.solution)
         ? classification.solution
         : undefined;
+    const llmSimilarServices =
+      classification && classification.isProblem && hasServices(classification.similarServices)
+        ? classification.similarServices
+        : undefined;
 
     const signals: PostProblemSignal[] = finalRuleIds.map((ruleId) => ({
       ruleId,
@@ -370,6 +702,7 @@ export async function analyzeProblemsFromPosts(
       sourceUrl: post.permalink,
       llmReason,
       llmSolution,
+      llmSimilarServices,
     }));
 
     signalsByPost.set(post.id, signals);
@@ -379,5 +712,9 @@ export async function analyzeProblemsFromPosts(
     await writeLlmCache(cache);
   }
 
-  return aggregateProblemsFromSignals(posts, (post) => signalsByPost.get(post.id) ?? []);
+  const aggregated = aggregateProblemsFromSignals(
+    posts,
+    (post) => signalsByPost.get(post.id) ?? [],
+  );
+  return verifyServicesInResults(aggregated);
 }
